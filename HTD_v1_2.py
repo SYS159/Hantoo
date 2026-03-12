@@ -1,6 +1,7 @@
 import requests
 import json
 import os
+import csv
 import time
 import logging
 import threading
@@ -20,8 +21,9 @@ DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 
 BASE_URL = "https://openapi.koreainvestment.com:9443"
 
-TOKEN_FILE = "token.json"
-LOG_NAME = "HTD_v1_2.log"
+TOKEN_FILE  = "token.json"
+TRADES_FILE = "trades.csv"
+LOG_NAME    = "HTD_v1_2.log"
 
 # =========================
 # 전략 파라미터 (여기서 조정)
@@ -182,6 +184,44 @@ def get_available_cash():
     except Exception as e:
         logging.error(f"Cash Error: {e}")
         return 0
+
+# =========================
+# 매매 기록 CSV 저장
+# =========================
+
+def save_trade(name, code, entry_price, exit_price, qty, reason):
+
+    profit_amt  = (exit_price - entry_price) * qty
+    profit_rate = (exit_price - entry_price) / entry_price * 100
+
+    file_exists = os.path.exists(TRADES_FILE)
+
+    try:
+        with open(TRADES_FILE, "a", newline="", encoding="utf-8-sig") as f:
+            writer = csv.writer(f)
+
+            # 헤더 (파일 없을 때만)
+            if not file_exists:
+                writer.writerow([
+                    "날짜", "종목명", "종목코드",
+                    "매수가", "매도가", "수량",
+                    "수익금(원)", "수익률(%)", "매도사유"
+                ])
+
+            writer.writerow([
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                name, code,
+                entry_price, exit_price, qty,
+                round(profit_amt, 0),
+                round(profit_rate, 2),
+                reason
+            ])
+
+        logging.info(f"Trade saved: {name} {profit_rate:.2f}% {profit_amt:,.0f}원")
+
+    except Exception as e:
+        logging.error(f"CSV Save Error: {e}")
+
 
 # =========================
 # 한투 API - 등락률 순위 조회
@@ -590,6 +630,15 @@ def trailing_loop():
                             if code in positions:
                                 del positions[code]
 
+                        save_trade(
+                            name=pos["name"],
+                            code=code,
+                            entry_price=pos["entry_price"],
+                            exit_price=current_price,
+                            qty=pos["qty"],
+                            reason="장마감 강제청산"
+                        )
+
                         send_discord(
                             f"🏁 장 마감 강제 청산\n"
                             f"종목: {pos['name']} ({code})\n"
@@ -638,6 +687,15 @@ def trailing_loop():
                     else:
                         emoji = "🟡"
                         label = "익절 (트레일링)"
+
+                    save_trade(
+                        name=pos["name"],
+                        code=code,
+                        entry_price=pos["entry_price"],
+                        exit_price=current_price,
+                        qty=pos["qty"],
+                        reason=label
+                    )
 
                     msg = (
                         f"{emoji} {label} 청산\n"
