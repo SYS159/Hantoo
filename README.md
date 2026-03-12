@@ -38,11 +38,8 @@ git pull
 ```bash
 ps -ef | grep python
 
-pkill -f TD_v5_4.py
-nohup python3 -u TD_v5_4.py > TD_v5_4.log 2>&1 &
-
-pkill -f M_v3_4.py
-nohup python3 -u  M_v3_4.py > M_v3_4.log 2>&1 &
+pkill -f M_v1_1.py
+nohup python3 -u M_v1_1.py > M_v1_1.log 2>&1 &
 
 -u가 있어야 로그 실시간으로 작성함.
 ```
