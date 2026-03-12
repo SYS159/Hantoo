@@ -15,7 +15,7 @@ nohup python3 -u M_v1_1.py > M_v1_1.log 2>&1 &
 ## 📌 Main Code
 
 **M_v1_1** 
-- 
+- 1시간마다 자산 확인
 
 
 ---
