@@ -9,7 +9,7 @@ cd Hantoo
 ## 🚀 실행
 ```bash
 nohup python3 -u HM_v1_1.py > /dev/null 2>&1 &
-nohup python3 -u HTD_v1_1.py > /dev/null 2>&1 &
+nohup python3 -u HTD_v1_2.py > /dev/null 2>&1 &
 ```
 
 
@@ -23,6 +23,25 @@ nohup python3 -u HTD_v1_1.py > /dev/null 2>&1 &
 - 급등주 오르면 5%이상 오르면 구매
 - +3% 트레일링 -1%
 - -2% 손절
+
+**HTD_v1_2**
+```bash
+[매수 - 09:05 ~ 10:30]
+등락률 +5% 이상
+체결강도 120 이상
+거래량 배율 09:05~09:30 → 2배 이상
+           09:30~10:30 → 3배 이상
+예수금 10만원 이상
+→ 10만원어치 매수
+
+[매도 - 트레일링]
+진입 후 -2% → 손절
+진입 후 +3% 도달 → 트레일링 활성화
+최고가 대비 -1% → 익절
+
+[강제청산 - 15:20]
+보유 종목 전부 시장가 청산
+```
 
 ---
 
@@ -47,8 +66,8 @@ ps -ef | grep python
 pkill -f HM_v1_1.py
 nohup python3 -u HM_v1_1.py > /dev/null 2>&1 &
 
-pkill -f HTD_v1_1.py
-nohup python3 -u HTD_v1_1.py > /dev/null 2>&1 &
+pkill -f HTD_v1_2.py
+nohup python3 -u HTD_v1_2.py > /dev/null 2>&1 &
 
 -u가 있어야 로그 실시간으로 작성함.
 ```
