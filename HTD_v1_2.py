@@ -73,11 +73,13 @@ def send_discord(msg):
         logging.error(f"Discord Error: {e}")
 
 # =========================
-# 토큰 관리
+# 토큰 관리 (읽기 전용 - 발급은 HM_v1_1.py 에서만)
 # =========================
 
-def load_token():
+def get_token():
+
     if not os.path.exists(TOKEN_FILE):
+        logging.error("token.json 없음 - HM_v1_1.py 를 먼저 실행하세요")
         return None
 
     with open(TOKEN_FILE) as f:
@@ -86,50 +88,10 @@ def load_token():
     expire = datetime.strptime(data["expire"], "%Y-%m-%d %H:%M:%S")
 
     if datetime.now() >= expire:
+        logging.error("토큰 만료 - HM_v1_1.py 를 재시작하세요")
         return None
 
     return data["token"]
-
-
-def save_token(token):
-    expire = datetime.now().replace(hour=23, minute=59, second=0)
-
-    with open(TOKEN_FILE, "w") as f:
-        json.dump({
-            "token": token,
-            "expire": expire.strftime("%Y-%m-%d %H:%M:%S")
-        }, f)
-
-
-def get_token():
-    token = load_token()
-
-    if token:
-        return token
-
-    url = f"{BASE_URL}/oauth2/tokenP"
-
-    data = {
-        "grant_type": "client_credentials",
-        "appkey": APP_KEY,
-        "appsecret": APP_SECRET
-    }
-
-    try:
-        res = requests.post(url, json=data, timeout=10)
-
-        if res.status_code != 200:
-            logging.error(res.text)
-            return None
-
-        token = res.json()["access_token"]
-        save_token(token)
-        logging.info("Token reissued")
-        return token
-
-    except Exception as e:
-        logging.error(f"Token Error: {e}")
-        return None
 
 # =========================
 # 트레일링 스탑 클래스

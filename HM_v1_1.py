@@ -255,5 +255,5 @@ def scheduler():
 if __name__ == "__main__":
 
     logging.info("Bot Start")
-
+    get_token()       # 시작 즉시 토큰 발급 ← 추가
     scheduler()
