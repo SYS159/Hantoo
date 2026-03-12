@@ -8,7 +8,7 @@ cd Hantoo
 ```
 ## 🚀 실행
 ```bash
-nohup python3 -u M_v1_1.py > M_v1_1.log 2>&1 &
+nohup python3 -u M_v1_1.py > /dev/null 2>&1 &
 ```
 
 
@@ -16,6 +16,7 @@ nohup python3 -u M_v1_1.py > M_v1_1.log 2>&1 &
 
 **M_v1_1** 
 - 1시간마다 자산 확인
+- 장시작, 장종료 알림
 
 
 ---
@@ -39,7 +40,7 @@ git pull
 ps -ef | grep python
 
 pkill -f M_v1_1.py
-nohup python3 -u M_v1_1.py > M_v1_1.log 2>&1 &
+nohup python3 -u M_v1_1.py > /dev/null 2>&1 &
 
 -u가 있어야 로그 실시간으로 작성함.
 ```

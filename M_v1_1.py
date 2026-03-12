@@ -1,61 +1,130 @@
 import requests
+import json
 import os
 import time
-from datetime import datetime
+import logging
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
+
+# =========================
+# 환경 변수
+# =========================
 
 load_dotenv()
 
 APP_KEY = os.getenv("APP_KEY")
 APP_SECRET = os.getenv("APP_SECRET")
 ACCOUNT = os.getenv("ACCOUNT")
-PRODUCT = os.getenv("PRODUCT")
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK")
+DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 
 BASE_URL = "https://openapi.koreainvestment.com:9443"
 
-access_token = None
-token_time = 0
+TOKEN_FILE = "token.json"
+LOG_NAME = "M_v1_1.log"
+
+# =========================
+# 로그 설정
+# =========================
+
+logging.basicConfig(
+    filename=LOG_NAME,
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
+
+# =========================
+# 디스코드 알림
+# =========================
+
+def send_discord(msg):
+
+    try:
+        requests.post(
+            DISCORD_WEBHOOK,
+            json={"content": msg},
+            timeout=10
+        )
+    except Exception as e:
+        logging.error(f"Discord Error: {e}")
+
+# =========================
+# 토큰 관리
+# =========================
+
+def load_token():
+
+    if not os.path.exists(TOKEN_FILE):
+        return None
+
+    with open(TOKEN_FILE) as f:
+        data = json.load(f)
+
+    expire = datetime.strptime(data["expire"], "%Y-%m-%d %H:%M:%S")
+
+    if datetime.now() >= expire:
+        return None
+
+    return data["token"]
 
 
-def issue_token():
+def save_token(token):
+
+    expire = datetime.now() + timedelta(hours=23)
+
+    with open(TOKEN_FILE, "w") as f:
+        json.dump({
+            "token": token,
+            "expire": expire.strftime("%Y-%m-%d %H:%M:%S")
+        }, f)
+
+
+def get_token():
+
+    token = load_token()
+
+    if token:
+        return token
 
     url = f"{BASE_URL}/oauth2/tokenP"
 
-    body = {
+    data = {
         "grant_type": "client_credentials",
         "appkey": APP_KEY,
         "appsecret": APP_SECRET
     }
 
-    res = requests.post(url, json=body)
+    try:
 
-    data = res.json()
+        res = requests.post(url, json=data, timeout=10)
 
-    print("토큰 발급:", data)
+        if res.status_code != 200:
+            logging.error(res.text)
+            return None
 
-    return data["access_token"]
+        token = res.json()["access_token"]
+
+        save_token(token)
+
+        logging.info("Token reissued")
+
+        return token
+
+    except Exception as e:
+
+        logging.error(f"Token Error: {e}")
+        return None
 
 
-def get_token():
-
-    global access_token, token_time
-
-    if access_token is None:
-        access_token = issue_token()
-        token_time = time.time()
-
-    elif time.time() - token_time > 60 * 60 * 23:
-        print("토큰 재발급")
-        access_token = issue_token()
-        token_time = time.time()
-
-    return access_token
-
+# =========================
+# 잔고 조회
+# =========================
 
 def check_balance():
 
     token = get_token()
+
+    if token is None:
+        return
 
     url = f"{BASE_URL}/uapi/domestic-stock/v1/trading/inquire-balance"
 
@@ -67,74 +136,111 @@ def check_balance():
     }
 
     params = {
-        "CANO": ACCOUNT,
-        "ACNT_PRDT_CD": PRODUCT,
+        "CANO": ACCOUNT[:8],
+        "ACNT_PRDT_CD": ACCOUNT[8:],
         "AFHR_FLPR_YN": "N",
         "OFL_YN": "",
         "INQR_DVSN": "02",
         "UNPR_DVSN": "01",
         "FUND_STTL_ICLD_YN": "N",
         "FNCG_AMT_AUTO_RDPT_YN": "N",
-        "PRCS_DVSN": "01",
-        "CTX_AREA_FK100": "",
-        "CTX_AREA_NK100": ""
+        "PRCS_DVSN": "01"
     }
 
-    res = requests.get(url, headers=headers, params=params)
+    try:
 
-    data = res.json()
+        res = requests.get(url, headers=headers, params=params, timeout=10)
 
-    stocks = data.get("output1", [])
+        if res.status_code != 200:
 
-    message = f"📊 자산 조회 ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n\n"
+            logging.error(res.text)
+            return
 
-    if len(stocks) == 0:
-        message += "보유 종목 없음"
-    else:
-        for s in stocks:
-            name = s["prdt_name"]
-            qty = s["hldg_qty"]
-            profit = s["evlu_pfls_rt"]
+        data = res.json()
 
-            message += f"{name} | {qty}주 | {profit}%\n"
+        total = data["output2"][0]["tot_evlu_amt"]
+        profit = data["output2"][0]["evlu_pfls_rt"]
 
-    send_discord(message)
+        msg = f"📊 계좌 현황 ({datetime.now().strftime('%H:%M')})\n\n"
+        msg += f"총 평가금액\n{int(total):,}원\n\n"
+        msg += f"총 수익률\n{profit}%\n\n"
+        msg += "보유 종목\n"
+
+        for stock in data["output1"]:
+
+            name = stock["prdt_name"]
+            qty = stock["hldg_qty"]
+            rate = stock["evlu_pfls_rt"]
+
+            msg += f"{name} {qty}주 {rate}%\n"
+
+        send_discord(msg)
+
+    except Exception as e:
+
+        logging.error(f"Balance Error: {e}")
 
 
-def send_discord(msg):
+# =========================
+# 장 상태 알림
+# =========================
 
-    data = {
-        "content": msg
-    }
+def market_open():
 
-    requests.post(WEBHOOK, json=data)
+    send_discord("🔔 한국 주식시장 개장 (09:00)")
 
-def wait_until_next_hour():
 
-    now = datetime.now()
+def market_close():
 
-    seconds = (60 - now.minute - 1) * 60 + (60 - now.second)
+    send_discord("🔔 한국 주식시장 마감 (15:30)")
 
-    print(f"다음 정각까지 {seconds}초 대기")
 
-    time.sleep(seconds)
+# =========================
+# 스케줄러
+# =========================
 
-def main():
+def scheduler():
 
-    print("자산 봇 시작")
-
-    wait_until_next_hour()   # 첫 정각 맞추기
+    last_hour = -1
+    open_sent = False
+    close_sent = False
 
     while True:
 
+        now = datetime.now()
+
         try:
-            check_balance()
+
+            # 장 시작
+            if now.hour == 9 and now.minute == 0 and not open_sent:
+                market_open()
+                open_sent = True
+
+            # 장 종료
+            if now.hour == 15 and now.minute == 30 and not close_sent:
+                market_close()
+                close_sent = True
+
+            # 정각 알림
+            if now.minute == 0 and now.hour != last_hour:
+
+                check_balance()
+
+                last_hour = now.hour
 
         except Exception as e:
-            print("오류:", e)
 
-        wait_until_next_hour()
+            logging.error(f"Scheduler Error: {e}")
 
+        time.sleep(20)
+
+
+# =========================
+# 시작
+# =========================
 
 if __name__ == "__main__":
-    main()
+
+    logging.info("Bot Start")
+
+    scheduler()
