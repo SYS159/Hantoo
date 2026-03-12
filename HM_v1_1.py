@@ -68,15 +68,14 @@ def load_token():
 
 
 def save_token(token):
-
-    expire = datetime.now() + timedelta(hours=23)
-
+    # 오늘 자정(23:59)을 만료 시간으로 설정
+    expire = datetime.now().replace(hour=23, minute=59, second=0)
+    
     with open(TOKEN_FILE, "w") as f:
         json.dump({
             "token": token,
             "expire": expire.strftime("%Y-%m-%d %H:%M:%S")
         }, f)
-
 
 def get_token():
 
