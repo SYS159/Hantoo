@@ -8,7 +8,7 @@ cd Hantoo
 ```
 ## 🚀 실행
 ```bash
-nohup python3 -u HM_v1_1.py > /dev/null 2>&1 &
+nohup python3 -u HM_v1_2.py > /dev/null 2>&1 &
 nohup python3 -u HTD_v1_2.py > /dev/null 2>&1 &
 ```
 
@@ -69,8 +69,8 @@ git pull
 ```bash
 ps -ef | grep python
 
-pkill -f HM_v1_1.py
-nohup python3 -u HM_v1_1.py > /dev/null 2>&1 &
+pkill -f HM_v1_2.py
+nohup python3 -u HM_v1_2.py > /dev/null 2>&1 &
 
 pkill -f HTD_v1_2.py
 nohup python3 -u HTD_v1_2.py > /dev/null 2>&1 &
