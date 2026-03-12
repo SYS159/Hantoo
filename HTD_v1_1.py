@@ -16,7 +16,7 @@ load_dotenv()
 APP_KEY = os.getenv("APP_KEY")
 APP_SECRET = os.getenv("APP_SECRET")
 ACCOUNT = os.getenv("ACCOUNT")
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")
 
 BASE_URL = "https://openapi.koreainvestment.com:9443"
 
@@ -60,7 +60,7 @@ logging.basicConfig(
 def send_discord(msg):
     try:
         requests.post(
-            DISCORD_WEBHOOK_URL,
+            DISCORD_WEBHOOK,
             json={"content": msg},
             timeout=10
         )
