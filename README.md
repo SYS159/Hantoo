@@ -8,8 +8,15 @@ cd Hantoo
 ```
 ## 🚀 실행
 ```bash
+ps -ef | grep python
 nohup python3 -u HM_v1_2.py > /dev/null 2>&1 &
 nohup python3 -u HTD_v1_2.py > /dev/null 2>&1 &
+```
+
+## 정지
+```bash
+pkill -f HM_v1_2.py
+pkill -f HTD_v1_2.py
 ```
 
 
@@ -63,17 +70,4 @@ git push
 **파일 내리기 (pull)**
 ```bash
 git pull
-```
-
-**라즈베리파이 명령어들**
-```bash
-ps -ef | grep python
-
-pkill -f HM_v1_2.py
-nohup python3 -u HM_v1_2.py > /dev/null 2>&1 &
-
-pkill -f HTD_v1_2.py
-nohup python3 -u HTD_v1_2.py > /dev/null 2>&1 &
-
--u가 있어야 로그 실시간으로 작성함.
 ```

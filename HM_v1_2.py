@@ -23,6 +23,7 @@ BASE_URL = "https://openapi.koreainvestment.com:9443"
 TOKEN_FILE       = "token.json"
 TRADES_FILE      = "trades.csv"
 WEEKLY_SENT_FILE = "weekly_sent.json"
+WEEKLY_START_FILE = "weekly_start.json"  # 이 줄을 추가합니다.
 LOG_NAME         = "HM_v1_2.log"
 
 # =========================
@@ -40,13 +41,15 @@ logging.basicConfig(
 # =========================
 
 def send_discord(msg):
-
     try:
-        requests.post(
+        res = requests.post(
             DISCORD_WEBHOOK,
             json={"content": msg},
             timeout=10
         )
+        # 디스코드 전송이 성공(200 또는 204)하지 않았다면 에러 로그 기록
+        if res.status_code not in [200, 204]:
+            logging.error(f"Discord 전송 실패: {res.status_code} - {res.text}")
     except Exception as e:
         logging.error(f"Discord Error: {e}")
 
@@ -121,6 +124,37 @@ def get_token():
 # 잔고 조회
 # =========================
 
+def get_saved_start_balance(current_total):
+    """주간 시작 금액(월요일 09시 기준)을 파일에서 관리합니다."""
+    this_monday = get_monday_of_week(datetime.now())
+    
+    # 1. 파일이 아예 없으면 말씀하신 100만 원으로 최초 1회 세팅
+    if not os.path.exists(WEEKLY_START_FILE):
+        save_weekly_start_balance(1000000, this_monday)
+        return 1000000.0
+
+    with open(WEEKLY_START_FILE, "r") as f:
+        data = json.load(f)
+
+    now = datetime.now()
+    
+    # 2. 월요일 09시가 지났고, 이번 주 기록이 아니라면 현재 잔고로 새로 갱신
+    is_new_week = (data.get("week_monday") != this_monday)
+    is_after_monday_open = (now.weekday() == 0 and now.hour >= 9) or (now.weekday() > 0)
+    
+    if is_new_week and is_after_monday_open:
+        save_weekly_start_balance(current_total, this_monday)
+        return float(current_total)
+        
+    return float(data.get("start_balance", current_total))
+
+def save_weekly_start_balance(balance, monday_date_str):
+    with open(WEEKLY_START_FILE, "w") as f:
+        json.dump({
+            "week_monday": monday_date_str,
+            "start_balance": float(balance)
+        }, f)
+
 def check_balance():
 
     now = datetime.now()
@@ -140,8 +174,8 @@ def check_balance():
 
     headers = {
         "authorization": f"Bearer {token}",
-        "appKey": APP_KEY,
-        "appSecret": APP_SECRET,
+        "appkey": APP_KEY,
+        "appsecret": APP_SECRET,
         "tr_id": "TTTC8434R"
     }
 
@@ -154,7 +188,9 @@ def check_balance():
         "UNPR_DVSN": "01",
         "FUND_STTL_ICLD_YN": "N",
         "FNCG_AMT_AUTO_RDPT_YN": "N",
-        "PRCS_DVSN": "01"
+        "PRCS_DVSN": "01",
+        "CTX_AREA_FK100": "",  # ✅ 추가 (필수)
+        "CTX_AREA_NK100": ""   # ✅ 추가 (필수)
     }
 
     try:
@@ -172,22 +208,50 @@ def check_balance():
             logging.error(f"Balance API error: {data}")
             return
 
-        total = data["output2"][0]["tot_evlu_amt"]
-        profit = data["output2"][0]["evlu_pfls_rt"]
+        total = float(data["output2"][0]["tot_evlu_amt"])
+        
+        # 주간 시작 금액 불러오기 (이번 주 월요일 9시 기준 갱신 또는 유지)
+        start_balance = get_saved_start_balance(total)
 
-        msg = f"📊 계좌 현황 ({now.strftime('%H:%M')})\n\n"
-        msg += f"총 평가금액\n{int(total):,}원\n\n"
-        msg += f"총 수익률\n{profit}%\n\n"
-        msg += "보유 종목\n"
+        # 이번 주 기준 누적 수익률 계산
+        if start_balance > 0:
+            profit_amt = total - start_balance
+            profit_rate = round((profit_amt / start_balance) * 100, 2)
+        else:
+            profit_amt = 0.0
+            profit_rate = 0.0
 
-        for stock in data.get("output1", []):
+        # =========================
+        # 디스코드 메시지 포맷팅
+        # =========================
+        msg = f"📊 [실시간 자산 리포트 - {now.strftime('%H:%M')}]\n"
+        
+        # 보유 종목 내역 추가
+        holdings = data.get("output1", [])
+        if holdings:
+            for stock in holdings:
+                name = stock.get("prdt_name", "Unknown")
+                rate = float(stock.get("evlu_pfls_rt", "0"))
+                amt = float(stock.get("evlu_amt", "0")) # 종목별 평가금액
+                
+                # 수익률에 따른 이모지 설정
+                if rate > 0:
+                    icon = "📈"
+                elif rate < 0:
+                    icon = "📉"
+                else:
+                    icon = "➖"
+                
+                # 디스코드 인용구(>)를 사용하여 들여쓰기 효과
+                msg += f"> {icon} {name}: {rate:+.2f}% (`{int(amt):,}원`)\n"
+        else:
+            msg += "> 텅~ (현재 보유 종목이 없습니다)\n"
 
-            name = stock.get("prdt_name", "Unknown")
-            qty = stock.get("hldg_qty", "0")
-            rate = stock.get("evlu_pfls_rt", "0")
-
-            msg += f"{name} {qty}주 {rate}%\n"
-
+        msg += "\n"
+        msg += f"💰 현재 총 자산: `{int(total):,}원`\n"
+        msg += f"📅 주간 성적: `{int(profit_amt):+,}원` (`{profit_rate:+.2f}%`)\n"
+        msg += "*(기준: 이번주 월요일 09:00)*"
+        
         send_discord(msg)
 
         logging.info("Balance check success")
@@ -372,7 +436,9 @@ def scheduler():
 if __name__ == "__main__":
 
     logging.info("Bot Start")
-
+    # ✅ 환경 변수 로딩 테스트 (터미널에서 직접 확인)
+    # print(f"디스코드 웹훅 로드 확인: {DISCORD_WEBHOOK}")
+    # print(f"계좌번호 로드 확인: {ACCOUNT}")
     get_token()   # 시작 즉시 토큰 발급
-
+    check_balance() # ✅ 테스트를 위해 시작 직후 잔고 조회 1회 실행
     scheduler()
