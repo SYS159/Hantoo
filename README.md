@@ -10,13 +10,13 @@ cd Hantoo
 ```bash
 ps -ef | grep python
 nohup python3 -u HM_v1_2.py > /dev/null 2>&1 &
-nohup python3 -u HTD_v1_2.py > /dev/null 2>&1 &
+nohup python3 -u HTD_v1_4.py > /dev/null 2>&1 &
 ```
 
 ## 정지
 ```bash
 pkill -f HM_v1_2.py
-pkill -f HTD_v1_2.py
+pkill -f HTD_v1_4.py
 ```
 
 
