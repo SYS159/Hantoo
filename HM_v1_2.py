@@ -155,6 +155,47 @@ def save_weekly_start_balance(balance, monday_date_str):
             "start_balance": float(balance)
         }, f)
 
+def is_market_holiday():
+    """오늘이 한국 거래소 휴장일인지 확인합니다."""
+    now = datetime.now()
+    today_str = now.strftime("%Y%m%d")
+    
+    # 주말이면 API 조회 없이 바로 휴일로 판단
+    if now.weekday() >= 5:
+        return True
+
+    token = get_token()
+    url = f"{BASE_URL}/uapi/domestic-stock/v1/quotations/chk-holiday"
+    
+    headers = {
+        "content-type": "application/json",
+        "authorization": f"Bearer {token}",
+        "appkey": APP_KEY,
+        "appsecret": APP_SECRET,
+        "tr_id": "CTCA0903R",
+        "custtype": "P"
+    }
+    
+    params = {
+        "BASS_DT": today_str, # 조회 기준일
+        "CTX_AREA_NK100": "",
+        "CTX_AREA_FK100": ""
+    }
+
+    try:
+        res = requests.get(url, headers=headers, params=params, timeout=10)
+        data = res.json()
+        
+        # 'opnd_yn': 'Y'면 개장, 'N'이면 휴장
+        for item in data.get("output", []):
+            if item["bass_dt"] == today_str:
+                return item["opnd_yn"] == "N"
+                
+    except Exception as e:
+        logging.error(f"Holiday Check Error: {e}")
+        
+    return False # 에러 발생 시 일단 평일로 간주 (알림이 오는 게 안 오는 것보다 낫기 때문)
+
 def check_balance():
 
     now = datetime.now()
@@ -382,48 +423,48 @@ def send_weekly_report():
 # =========================
 
 def scheduler():
-
     last_hour  = -1
     open_sent  = False
     close_sent = False
     last_date  = ""
+    is_holiday_today = False # 오늘 휴장 여부 저장 변수
 
     while True:
-
         now = datetime.now()
+        today = now.strftime("%Y-%m-%d")
 
         try:
-
-            # 날짜 바뀌면 플래그 초기화
-            today = now.strftime("%Y-%m-%d")
+            # 날짜가 바뀌면 오늘이 휴장일인지 새로 확인
             if today != last_date:
+                is_holiday_today = is_market_holiday()
                 open_sent  = False
                 close_sent = False
                 last_date  = today
+                logging.info(f"오늘 휴장 여부 체크 결과: {is_holiday_today}")
 
-            # 장 시작
-            if now.hour == 9 and now.minute == 0 and not open_sent:
-                market_open()
-                open_sent = True
+            # 오늘이 휴장일이 아닐 때만 실행
+            if not is_holiday_today:
+                # 장 시작 알림
+                if now.hour == 9 and now.minute == 0 and not open_sent:
+                    market_open()
+                    open_sent = True
 
-            # 장 종료
-            if now.hour == 15 and now.minute == 30 and not close_sent:
-                market_close()
-                close_sent = True
+                # 장 종료 알림
+                if now.hour == 15 and now.minute == 30 and not close_sent:
+                    market_close()
+                    close_sent = True
 
-            # 정각 알림
-            if now.minute == 0 and now.hour != last_hour:
-
-                check_balance()
-
-                # 09:00 에 주간 리포트 체크 (매일 - 이번주 미전송 시 전송)
-                if now.hour == 9 and not is_weekly_report_sent():
-                    send_weekly_report()
-
-                last_hour = now.hour
+                # 정각 잔고 조회
+                if now.minute == 0 and now.hour != last_hour:
+                    check_balance()
+                    
+                    # 주간 리포트 (월요일 9시)
+                    if now.hour == 9 and not is_weekly_report_sent():
+                        send_weekly_report()
+                    
+                    last_hour = now.hour
 
         except Exception as e:
-
             logging.error(f"Scheduler Error: {e}")
 
         time.sleep(20)
