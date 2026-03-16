@@ -24,45 +24,60 @@ BASE_URL = "https://openapi.koreainvestment.com:9443"
 TOKEN_FILE  = "token.json"
 TRADES_FILE = "trades.csv"
 LOG_NAME    = "HTD_v1_4.log"
+ASSET_FILE = "weekly_asset.json" # 주간 기준 자산을 저장할 파일
 
 # =========================
-# 전략 파라미터 (여기서 조정)
+# 전략 파라미터 (실전용 세팅)
 # =========================
 
 BUY_AMOUNT = 100_000        # 종목당 매수 금액 (원)
 
-SCAN_INTERVAL = 10          # 스캐너 루프 간격 (초)
-TRAILING_INTERVAL = 3       # 트레일링 루프 간격 (초)
+SCAN_INTERVAL = 10          
+TRAILING_INTERVAL = 3       
 
-MIN_CHANGE_RATE = 5.0       # 최소 등락률 조건 (%)
-MIN_EXEC_STRENGTH = 120.0   # 최소 체결강도
+MIN_CHANGE_RATE = 4.0       # 3%는 휩소가 많고, 5%는 이미 늦을 수 있으니 4% 돌파 시점
+MIN_EXEC_STRENGTH = 110.0   # 110은 살짝 불안하고 120은 너무 빡셈.
 
-# [수정됨] 시간대별 거래량 배율 (현실적인 급등주 수치로 조정)
-VOLUME_RATIO_EARLY = 0.5    # 09:05 ~ 09:30 (장 초반 50%면 대폭발)
-VOLUME_RATIO_LATE  = 1.0    # 09:30 ~ 10:30 (1시간 만에 전일 거래량 100% 돌파)
+# 거래량 배율 (잡주 필터링)
+VOLUME_RATIO_EARLY = 0.3    # 09:05 ~ 09:30: 전일 거래량의 30% (이 정도면 장 초반치고 확실히 수급이 몰린 것)
+VOLUME_RATIO_LATE  = 0.6    # 09:30 ~ 10:30: 전일 거래량의 60% 돌파
 
-STOP_LOSS_RATE = -2.0       # 손절 기준 (%)
-TRAILING_TRIGGER = 3.0      # 트레일링 스탑 활성화 기준 (%)
-TRAILING_DROP = 1.0         # 최고가 대비 하락 시 청산 기준 (%)
+STOP_LOSS_RATE = -2.0       # 칼손절
+TRAILING_TRIGGER = 3.0      # 3% 수익부터 트레일링 시작
+TRAILING_DROP = 1.0         # 고점 대비 1% 빠지면 익절
 
-SCAN_START  = (9,  5)       # 매수 스캔 시작
-SCAN_MID    = (9, 30)       # 거래량 배율 전환 시점
-SCAN_END    = (10, 30)      # 매수 스캔 종료
-TRAILING_END = (15, 20)     # 트레일링 종료
+SCAN_START  = (9,  5)       # 9시 5분부터 사냥 시작
+SCAN_MID    = (9, 30)       
+SCAN_END    = (10, 30)      # 10시 30분 이후엔 쳐다보지도 않음 (오전장 변동성만 먹기)
+TRAILING_END = (15, 20)     # 장 마감 전 강제 청산
 
 # =========================
 # 로그 설정
 # =========================
 
 logging.basicConfig(
-    filename=LOG_NAME,
     level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s"
+    format="%(asctime)s | %(levelname)s | %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_NAME, encoding='utf-8'), # 파일에 저장
+        logging.StreamHandler()                          # 터미널 화면에 출력
+    ]
 )
 
 # =========================
 # 공통 함수 (토큰, 디스코드, 예수금, CSV 저장)
 # =========================
+
+def check_weekly_reset():
+    """월요일 09시가 되면 기준 자산을 현재 예수금으로 갱신"""
+    now = datetime.now()
+    # 월요일(0)이고 09:00 ~ 09:05 사이일 때만 실행
+    if now.weekday() == 0 and now.hour == 9 and 0 <= now.minute < 5:
+        current_cash = get_available_cash() # 현재 예수금 조회
+        with open(ASSET_FILE, "w") as f:
+            json.dump({"base_asset": current_cash, "date": str(now.date())}, f)
+        send_discord(f"📅 주간 수익률 초기화 완료\n기준 자산: {current_cash:,}원")
+        logging.info(f"Weekly reset: {current_cash}원")
 
 def send_discord(msg):
     try:
@@ -304,7 +319,7 @@ positions = {}
 positions_lock = threading.Lock()
 
 # =========================
-# 스캐너 루프
+# 스캐너 루프 (버그 수정 및 최적화 완료)
 # =========================
 
 def scanner_loop():
@@ -312,11 +327,23 @@ def scanner_loop():
     while True:
         try:
             now = datetime.now()
+            
+            # [수정 1] 월요일 아침 주간 자산 초기화 함수 실행
+            check_weekly_reset()
+
             start = now.replace(hour=SCAN_START[0], minute=SCAN_START[1], second=0)
             end   = now.replace(hour=SCAN_END[0], minute=SCAN_END[1], second=0)
             mid   = now.replace(hour=SCAN_MID[0], minute=SCAN_MID[1], second=0)
 
+            # 장 시간이 아니면 휴식
             if not (start <= now <= end):
+                time.sleep(SCAN_INTERVAL)
+                continue
+
+            # [수정 2] 예수금 조회를 반복문 밖으로 뺌 (API 호출 최소화 및 break 버그 방지)
+            available_cash = get_available_cash()
+            if available_cash < BUY_AMOUNT:
+                # 잔고가 부족하거나 API 오류로 0원이 리턴되면 이번 스캔은 패스
                 time.sleep(SCAN_INTERVAL)
                 continue
 
@@ -332,25 +359,27 @@ def scanner_loop():
                 change_rate = float(stock.get("prdy_ctrt", "0"))
                 exec_strength = float(stock.get("seln_cntg_csnu", "0"))
 
+                # 1차 필터링: 보유 종목, 등락률, 체결강도 확인
                 if code in current_codes: continue
                 if change_rate < MIN_CHANGE_RATE: continue
                 if exec_strength < MIN_EXEC_STRENGTH: continue
 
-                # [적용 2번] API 초당 호출 건수 제한 방어
+                # API 초당 호출 건수 제한 방어
                 time.sleep(0.2) 
 
+                # 2차 필터링: 거래량 배율 확인
                 volume_ratio = get_volume_ratio(code)
                 if volume_ratio < required_volume_ratio: continue
 
-                available_cash = get_available_cash()
-                if available_cash < BUY_AMOUNT: break
-
+                # 최종 현재가 확인
                 current_price = get_current_price(code)
                 if not current_price or current_price <= 0: continue
 
+                # 매수 수량 계산
                 qty = BUY_AMOUNT // current_price
                 if qty <= 0: continue
 
+                # 매수 실행
                 if buy_market(code, name, qty):
                     ts = TrailingStop(entry_price=current_price)
                     with positions_lock:
@@ -359,11 +388,17 @@ def scanner_loop():
                     msg = f"🟢 신규 진입\n종목: {name}\n진입가: {current_price:,}원\n수량: {qty}주\n현재 보유: {len(positions)}개"
                     send_discord(msg)
                     logging.info(f"Position opened: {name} @ {current_price}")
+                    
+                    # [수정 3] 예수금 실시간 차감 반영 (한 번 샀으면 남은 예수금에서 빼줌)
+                    available_cash -= (current_price * qty)
+                    if available_cash < BUY_AMOUNT:
+                        break # 남은 돈이 없으면 안전하게 종목 스캔 종료
 
                 time.sleep(0.5) 
 
         except Exception as e:
             logging.error(f"Scanner Error: {e}")
+        
         time.sleep(SCAN_INTERVAL)
 
 # =========================
