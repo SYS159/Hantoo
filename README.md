@@ -9,14 +9,14 @@ cd Hantoo
 ## 🚀 실행
 ```bash
 ps -ef | grep python
-nohup python3 -u HM_v1_2.py > /dev/null 2>&1 &
-nohup python3 -u HTD_v1_4.py > /dev/null 2>&1 &
+nohup python3 -u HM_v1_3.py > /dev/null 2>&1 &
+nohup python3 -u HTD_v1_5.py > /dev/null 2>&1 &
 ```
 
 ## 정지
 ```bash
-pkill -f HM_v1_2.py
-pkill -f HTD_v1_4.py
+pkill -f HM_v1_3.py
+pkill -f HTD_v1_5.py
 ```
 
 
@@ -29,6 +29,11 @@ pkill -f HTD_v1_4.py
 **HM_v1_2**
 - 매주 월요일 CSV파일 읽어서 주간보고
 - 주식시장이 개장하는날 && 주식시장 운영 시간에만 알림
+
+**HM_v1_3**
+- 유령 주식 알림 X
+
+## 📌 Trading Code
 
 **HTD_v1_1**
 - 급등주 오르면 5%이상 오르면 구매
@@ -57,26 +62,17 @@ pkill -f HTD_v1_4.py
 날짜                 종목명   종목코드  매수가  매도가  수량  수익금(원)  수익률(%)  매도사유
 ```
 
-**HTD_v1_3.py**
+**HTD_v1_3**
 - 슬리피지 방지
 
-**HTD_v1_4.py**
+**HTD_v1_4**
 - 손절은 시장가
 - 트레일링 루프 백그라운드로
 - API 과호출 수정
 
+**HTD_v1_5**
+- 스캔타임 대거 수정
+- 매수 제외 키워드
+- 갭상승 체크
+
 ---
-
-## 💻 자주 쓰는 명령어
-
-**파일 올리기 (push)**
-```bash
-git add 파일명.py
-git commit -m "메시지"
-git push
-```
-
-**파일 내리기 (pull)**
-```bash
-git pull
-```
