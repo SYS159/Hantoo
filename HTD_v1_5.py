@@ -297,19 +297,23 @@ def sell_smart(stock_code, stock_name, qty):
             order_no = res_data["output"]["odno"]
             
             executed = False
-            for _ in range(10):
+            # 💡 [수정] 10초 대기에서 5초 대기로 단축!
+            for _ in range(5): 
                 time.sleep(1)
                 if is_executed(order_no):
                     executed = True
                     break
             
             if executed: return True
+            
+            # 5초간 안 팔리면 즉시 취소하고 다음 가격으로 재시도
             cancel_order(order_no)
             retry_count += 1
+            logging.info(f"[{stock_name}] 매도 미체결 -> 가격 재조정 중 ({retry_count}/6)")
         except:
             break
             
-    logging.warning(f"{stock_name} 지정가 실패 -> 시장가 던짐")
+    logging.warning(f"{stock_name} 지정가 실패 -> 최종 시장가 던짐")
     return sell_market(stock_code, stock_name, qty)
 
 def execute_async_sell(code, name, qty, entry_price, trigger_price, signal):
