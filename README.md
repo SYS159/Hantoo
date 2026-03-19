@@ -10,13 +10,13 @@ cd Hantoo
 ```bash
 ps -ef | grep python
 nohup python3 -u HM_v1_3.py > /dev/null 2>&1 &
-nohup python3 -u HTD_v1_5.py > /dev/null 2>&1 &
+nohup python3 -u HTD_v1_6.py > /dev/null 2>&1 &
 ```
 
 ## 정지
 ```bash
 pkill -f HM_v1_3.py
-pkill -f HTD_v1_5.py
+pkill -f HTD_v1_6.py
 ```
 
 
@@ -74,5 +74,9 @@ pkill -f HTD_v1_5.py
 - 스캔타임 대거 수정
 - 매수 제외 키워드
 - 갭상승 체크
+
+**HTD_v1_6**
+- 파라미터 수정
+- 한개의 주식은 하루에 한번만 거래
 
 ---
