@@ -189,32 +189,32 @@ def check_weekly_reset():
         data = get_weekly_data()
         today_str = str(now.date())
         
-        # 💡 이미 오늘 날짜로 초기화 기록이 있으면 중단 (알림 폭탄 방지)
         if data.get("last_reset_date") == today_str:
             return
             
-        current_cash = get_available_cash() 
-        update_weekly_data("base_asset", current_cash)
-        update_weekly_data("last_reset_date", today_str) # 오늘 완료했음을 기록
-        
-        send_discord(f"📅 주간 수익률 초기화 완료\n기준 자산: {current_cash:,}원")
-        logging.info(f"Weekly reset: {current_cash}원")
+        current_total = get_total_evaluation() 
+        if current_total > 0:
+            update_weekly_data("start_balance", current_total)
+            update_weekly_data("last_reset_date", today_str) 
+            
+            send_discord(f"📅 주간 수익률 초기화 완료\n기준 총 자산: {current_total:,}원")
+            logging.info(f"Weekly reset: {current_total}원")
 
 def init_weekly_data():
-    """봇 최초 실행 시 (또는 월요일 9시를 놓쳤을 때) 현재 자산으로 주간 기준점을 즉시 생성합니다."""
+    """봇 최초 실행 시 (또는 월요일 9시를 놓쳤을 때) 현재 총 자산으로 주간 기준점을 즉시 생성합니다."""
     data = get_weekly_data()
     
-    # 기준 예수금이 0이라면 (파일이 없었거나, 9시 초기화를 놓친 경우)
-    if data.get("base_asset", 0) == 0:
-        current_cash = get_available_cash()
+    # start_balance가 비어있다면
+    if data.get("start_balance", 0.0) == 0.0:
+        current_total = get_total_evaluation()
         
-        if current_cash > 0:
-            update_weekly_data("base_asset", current_cash)
+        if current_total > 0:
+            update_weekly_data("start_balance", current_total)
             update_weekly_data("last_reset_date", str(datetime.now().date()))
             
-            msg = f"🆕 [주간 데이터 초기화] 이번 주 기준 예수금이 현재 시점(`{current_cash:,}원`)으로 자동 세팅되었습니다."
+            msg = f"🆕 [주간 데이터 초기화] 이번 주 기준 총 자산이 현재 시점(`{current_total:,}원`)으로 자동 세팅되었습니다."
             send_discord(msg)
-            logging.info(f"Initial weekly reset: {current_cash}원")
+            logging.info(f"Initial weekly reset: {current_total}원")
 
 # =========================
 # 공통 / API 함수 
@@ -241,6 +241,39 @@ def get_available_cash():
         return int(data["output"]["ord_psbl_cash"]) if data.get("rt_cd") == "0" else 0
     except:
         return 0
+
+def get_total_evaluation():
+    """계좌의 현재 총 평가자산(예수금 + 주식 평가금액)을 조회합니다."""
+    token = get_token()
+    if not token: return 0
+    url = f"{BASE_URL}/uapi/domestic-stock/v1/trading/inquire-balance"
+    headers = {
+        "authorization": f"Bearer {token}",
+        "appKey": APP_KEY,
+        "appSecret": APP_SECRET,
+        "tr_id": "TTTC8434R"
+    }
+    params = {
+        "CANO": ACCOUNT[:8],
+        "ACNT_PRDT_CD": ACCOUNT[8:],
+        "AFHR_FLPR_YN": "N",
+        "OFL_YN": "",
+        "INQR_DVSN": "02",
+        "UNPR_DVSN": "01",
+        "FUND_STTL_ICLD_YN": "N",
+        "FNCG_AMT_AUTO_RDPT_YN": "N",
+        "PRCS_DVSN": "01",
+        "CTX_AREA_FK100": "",
+        "CTX_AREA_NK100": ""
+    }
+    try:
+        res = requests.get(url, headers=headers, params=params, timeout=10)
+        data = res.json()
+        if data.get("rt_cd") == "0" and "output2" in data and len(data["output2"]) > 0:
+            return int(float(data["output2"][0]["tot_evlu_amt"]))
+    except Exception as e:
+        logging.error(f"Total Evaluation Error: {e}")
+    return 0
 
 def save_trade(name, code, entry_price, exit_price, qty, reason):
     profit_amt  = (exit_price - entry_price) * qty
