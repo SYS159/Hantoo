@@ -9,14 +9,14 @@ cd Hantoo
 ## 🚀 실행
 ```bash
 ps -ef | grep python
-nohup python3 -u HM_v1_3.py > /dev/null 2>&1 &
-nohup python3 -u HTD_v1_7.py > /dev/null 2>&1 &
+nohup python3 -u HM_v1_4.py > /dev/null 2>&1 &
+nohup python3 -u HTD_v1_8.py > /dev/null 2>&1 &
 ```
 
 ## 정지
 ```bash
-pkill -f HM_v1_3.py
-pkill -f HTD_v1_7.py
+pkill -f HM_v1_4.py
+pkill -f HTD_v1_8.py
 ```
 
 
@@ -32,6 +32,9 @@ pkill -f HTD_v1_7.py
 
 **HM_v1_3**
 - 유령 주식 알림 X
+
+**HM_v1_4**
+- weekly_info.json으로 json 통합
 
 ## 📌 Trading Code
 
@@ -83,5 +86,8 @@ pkill -f HTD_v1_7.py
 - 월요일 리셋 오류 수정
 - json 파일 통합
 - D+2 기준 금액 비교
+
+**HTD_v1_8**
+- 익절 알림 안오는거 수정
 
 ---
