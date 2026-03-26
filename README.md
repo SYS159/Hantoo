@@ -10,13 +10,13 @@ cd Hantoo
 ```bash
 ps -ef | grep python
 nohup python3 -u HM_v1_4.py > /dev/null 2>&1 &
-nohup python3 -u HTD_v1_8.py > /dev/null 2>&1 &
+nohup python3 -u HTD_v2_1.py > /dev/null 2>&1 &
 ```
 
 ## 정지
 ```bash
 pkill -f HM_v1_4.py
-pkill -f HTD_v1_8.py
+pkill -f HTD_v2_1.py
 ```
 
 
@@ -89,5 +89,8 @@ pkill -f HTD_v1_8.py
 
 **HTD_v1_8**
 - 익절 알림 안오는거 수정
+
+**THD_v2_1**
+- 오전 9시20분까지만 매수
 
 ---

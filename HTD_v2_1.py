@@ -22,42 +22,38 @@ BASE_URL = "https://openapi.koreainvestment.com:9443"
 
 TOKEN_FILE  = "token.json"
 TRADES_FILE = "trades.csv"
-LOG_NAME    = "HTD_v1_8.log"
+LOG_NAME    = "HTD_v2_1.log"
 ASSET_FILE  = "weekly_asset.json"
 POSITIONS_FILE = "positions.json"
 SOLD_FILE = "sold_today.json"
 
 # =========================
-# 전략 파라미터 (V1.6: 야생마 탑승 & 철벽 방어 모드)
+# 전략 파라미터 (V2.1: 아침 20분 단기 결전 모드)
 # =========================
-BUY_AMOUNT = 200_000        
-
-# 1000원 미만 동전주 매수 금지 (호가 틱 가치 리스크 차단)
+BUY_AMOUNT = 500_000        
 MIN_PRICE = 1000            
 
 SCAN_INTERVAL = 10          
 TRAILING_INTERVAL = 3       
 
-# 대장주 탑승을 위해 상한선은 15%로 넉넉하게 열어둠
 MIN_CHANGE_RATE = 4.0       
 MAX_CHANGE_RATE = 15.0      
-MIN_REAL_CHANGE_RATE = 2.0  # 시초가 대비 2% 이상 찐상승 필터 유지
+MIN_REAL_CHANGE_RATE = 2.0  
 
 EXCLUDE_KEYWORDS = ["인버스", "스팩", "ETN", "ETF", "타이거", "코덱스", "KODEX", "TIGER"]
 
-# 거래량 허들 대폭 하향 (상승 초입 조기 탑승)
-VOLUME_RATIO_EARLY = 0.05   # 09:02 ~ 09:20: 전일 거래량의 5% 돌파
-VOLUME_RATIO_LATE  = 0.1    # 09:20 ~ 09:40: 전일 거래량의 10% 돌파
+# 💡 9시 20분까지만 매수하므로 단일 거래량 조건만 사용!
+VOLUME_RATIO = 0.05   
 
-# 휩소(흔들기) 버티기 맷집 강화 세팅
+# 💡 찰나의 고점을 놓치지 않기 위해 트레일링 스탑 예민도 상승
 STOP_LOSS_RATE = -3.0       
-TRAILING_TRIGGER = 4.0      
-TRAILING_DROP = 2.0         
+TRAILING_TRIGGER = 3.0      # 4.0 -> 3.0으로 낮춤 (빨리 익절 모드 진입)
+TRAILING_DROP = 1.5         # 2.0 -> 1.5로 낮춤 (고점에서 1.5% 빠지면 칼익절)
 
+# 💡 스캔 시간을 9시 2분 ~ 9시 20분으로 확 줄임! (20분 이후엔 매수 안 함)
 SCAN_START  = (9,  2)       
-SCAN_MID    = (9, 20)       
-SCAN_END    = (9, 40)       
-TRAILING_END = (15, 20)     
+SCAN_END    = (9, 20)       
+TRAILING_END = (15, 20)   
 
 # =========================
 # 로그 설정 및 전역 변수
@@ -426,12 +422,12 @@ class TrailingStop:
         return "HOLD", rate, state_changed
 
 # =========================
-# 스캐너 루프
+# 스캐너 루프 (V2.1: 아침 20분 단기 결전 모드)
 # =========================
 def scanner_loop():
     logging.info("Scanner loop started")
     
-    # 💡 [추가] 시작할 때의 날짜를 기억해 둠 (자정 초기화용)
+    # 💡 시작할 때의 날짜를 기억해 둠 (자정 초기화용)
     current_date = datetime.now().date() 
     
     while True:
@@ -439,7 +435,7 @@ def scanner_loop():
             now = datetime.now()
             check_weekly_reset()
 
-            # 💡 [추가] 자정이 지나서 날짜가 바뀌면 블랙리스트 싹 다 초기화!
+            # 자정이 지나서 날짜가 바뀌면 블랙리스트 싹 다 초기화!
             if current_date != now.date():
                 with sold_lock:
                     sold_today.clear()
@@ -448,10 +444,11 @@ def scanner_loop():
                 logging.info("🌅 날짜가 변경되어 블랙리스트가 초기화되었습니다!")
                 send_discord("🌅 새 아침이 밝았습니다! 매도 블랙리스트 초기화 완료.")
 
+            # 💡 [핵심 변경] 9시 2분부터 9시 20분까지만 스캔! (mid 시간 삭제)
             start = now.replace(hour=SCAN_START[0], minute=SCAN_START[1], second=0)
             end   = now.replace(hour=SCAN_END[0], minute=SCAN_END[1], second=0)
-            mid   = now.replace(hour=SCAN_MID[0], minute=SCAN_MID[1], second=0)
 
+            # 9시 20분이 넘어가면 새로운 사냥(스캔)은 칼같이 멈추고 무한 휴식!
             if not (start <= now <= end):
                 time.sleep(SCAN_INTERVAL)
                 continue
@@ -465,7 +462,8 @@ def scanner_loop():
                 time.sleep(SCAN_INTERVAL)
                 continue
 
-            required_volume_ratio = VOLUME_RATIO_EARLY if now < mid else VOLUME_RATIO_LATE
+            # 💡 [핵심 변경] 시간에 따른 거래량 변화 없이 단일 허들만 깔끔하게 적용!
+            required_volume_ratio = VOLUME_RATIO 
             stocks = get_top_stocks()
 
             for stock in stocks:
@@ -492,7 +490,7 @@ def scanner_loop():
 
                 time.sleep(0.2) 
 
-                # 필터 4: 거래량 허들
+                # 필터 4: 단일 거래량 허들 적용
                 volume_ratio = get_volume_ratio(code)
                 if volume_ratio < required_volume_ratio:
                     continue
