@@ -301,6 +301,54 @@ def market_close():
     send_discord("🔔 **한국 주식시장 마감 (15:30)**")
 
 # =========================
+# 일일 결산 리포트 (15:30 발송용)
+# =========================
+
+def send_daily_report():
+    if not os.path.exists(TRADES_FILE):
+        logging.info("trades.csv 없음 - 일일 리포트 스킵")
+        return
+
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    trades_today = []
+
+    try:
+        # csv 파일에서 오늘 날짜의 거래 내역만 추출
+        with open(TRADES_FILE, "r", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if row["날짜"].startswith(today_str):
+                    trades_today.append(row)
+    except Exception as e:
+        logging.error(f"CSV Read Error: {e}")
+        return
+
+    msg = f"🌅 **[오늘의 매매 결산 - {today_str}]**\n\n"
+
+    # 오늘 거래가 아예 없었던 경우
+    if not trades_today:
+        msg += "오늘은 거래가 발생하지 않았습니다. 푹 쉬세요! ☕"
+        send_discord(msg)
+        return
+
+    # 오늘 거래가 있었던 경우 계산
+    total_profit = sum(float(t["수익금(원)"]) for t in trades_today)
+    win_trades = [t for t in trades_today if float(t["수익금(원)"]) > 0]
+    lose_trades = [t for t in trades_today if float(t["수익금(원)"]) <= 0]
+
+    msg += f"**총 매매 횟수:** {len(trades_today)}회 ({len(win_trades)}승 {len(lose_trades)}패)\n"
+    msg += f"**오늘 총 수익금:** `{total_profit:+,.0f}원`\n\n"
+    msg += "📊 **상세 거래 내역**\n"
+
+    for t in trades_today:
+        emoji = "🟢" if float(t["수익금(원)"]) > 0 else "🔴"
+        msg += f"> {emoji} {t['종목명']} {float(t['수익률(%)']):+.2f}% (`{float(t['수익금(원)']):+,.0f}원`)\n"
+
+    send_discord(msg)
+    logging.info("Daily report sent")
+
+
+# =========================
 # 주간 리포트
 # =========================
 
@@ -409,6 +457,7 @@ def scheduler():
 
                 if now.hour == 15 and now.minute == 30 and not close_sent:
                     market_close()
+                    send_daily_report() # 💡 방금 만든 일일 결산 함수를 여기에 추가!
                     close_sent = True
 
                 if current_time_str != last_notified_time:

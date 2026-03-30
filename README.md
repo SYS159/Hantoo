@@ -9,13 +9,13 @@ cd Hantoo
 ## 🚀 실행
 ```bash
 ps -ef | grep python
-nohup python3 -u HM_v1_4.py > /dev/null 2>&1 &
+nohup python3 -u HM_v1_5.py > /dev/null 2>&1 &
 nohup python3 -u HTD_v2_1.py > /dev/null 2>&1 &
 ```
 
 ## 정지
 ```bash
-pkill -f HM_v1_4.py
+pkill -f HM_v1_5.py
 pkill -f HTD_v2_1.py
 ```
 
@@ -35,6 +35,10 @@ pkill -f HTD_v2_1.py
 
 **HM_v1_4**
 - weekly_info.json으로 json 통합
+
+**HM_v1_5**
+- 주간 수익률 초기화 알림 여러번오는거 수정
+- 주간 수익률 알림 + 주간 정리 시간 9-> 8:30
 
 ## 📌 Trading Code
 

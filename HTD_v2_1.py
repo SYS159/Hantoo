@@ -30,7 +30,7 @@ SOLD_FILE = "sold_today.json"
 # =========================
 # 전략 파라미터 (V2.1: 아침 20분 단기 결전 모드)
 # =========================
-BUY_AMOUNT = 500_000        
+BUY_AMOUNT = 450_000        
 MIN_PRICE = 1000            
 
 SCAN_INTERVAL = 10          
@@ -43,16 +43,16 @@ MIN_REAL_CHANGE_RATE = 2.0
 EXCLUDE_KEYWORDS = ["인버스", "스팩", "ETN", "ETF", "타이거", "코덱스", "KODEX", "TIGER"]
 
 # 💡 9시 20분까지만 매수하므로 단일 거래량 조건만 사용!
-VOLUME_RATIO = 0.05   
+VOLUME_RATIO = 0.03   
 
 # 💡 찰나의 고점을 놓치지 않기 위해 트레일링 스탑 예민도 상승
 STOP_LOSS_RATE = -3.0       
 TRAILING_TRIGGER = 3.0      # 4.0 -> 3.0으로 낮춤 (빨리 익절 모드 진입)
 TRAILING_DROP = 1.5         # 2.0 -> 1.5로 낮춤 (고점에서 1.5% 빠지면 칼익절)
 
-# 💡 스캔 시간을 9시 2분 ~ 9시 20분으로 확 줄임! (20분 이후엔 매수 안 함)
+# 💡 스캔 시간을 9시 2분 ~ 9시 10분으로 확 줄임! (10분 이후엔 매수 안 함)
 SCAN_START  = (9,  2)       
-SCAN_END    = (9, 20)       
+SCAN_END    = (9, 10)       
 TRAILING_END = (15, 20)   
 
 # =========================
@@ -203,18 +203,37 @@ def get_top_stocks():
     except:
         return []
 
-def get_current_price(stock_code):
+def get_real_buy_price(stock_code):
+    """실제 계좌 잔고를 조회해서 진짜 매입 평단가를 가져오는 함수"""
     token = get_token()
     if not token: return None
-    url = f"{BASE_URL}/uapi/domestic-stock/v1/quotations/inquire-price"
-    headers = {"authorization": f"Bearer {token}", "appKey": APP_KEY, "appSecret": APP_SECRET, "tr_id": "FHKST01010100"}
-    params = {"fid_cond_mrkt_div_code": "J", "fid_input_iscd": stock_code}
+    url = f"{BASE_URL}/uapi/domestic-stock/v1/trading/inquire-balance"
+    headers = {"authorization": f"Bearer {token}", "appKey": APP_KEY, "appSecret": APP_SECRET, "tr_id": "TTTC8434R"}
+    # API 요청 파라미터
+    params = {
+        "CANO": ACCOUNT[:8], 
+        "ACNT_PRDT_CD": ACCOUNT[8:], 
+        "AFHR_FLPR_YN": "N", 
+        "OFL_YN": "", 
+        "INQR_DVSN": "01", 
+        "UNPR_DVSN": "01", 
+        "FUND_STTL_ICLD_YN": "N", 
+        "FNCG_AMT_AUTO_RDPT_YN": "N", 
+        "PRCS_DVSN": "00", 
+        "CTX_AREA_FK100": "", 
+        "CTX_AREA_NK100": ""
+    }
     try:
         res = requests.get(url, headers=headers, params=params, timeout=10)
         data = res.json()
-        return int(data["output"]["stck_prpr"]) if data.get("rt_cd") == "0" else None
-    except:
-        return None
+        if data.get("rt_cd") == "0":
+            # 내 잔고 목록을 싹 뒤져서 방금 산 종목의 진짜 평단가를 찾음
+            for item in data.get("output1", []):
+                if item["pdno"] == stock_code:
+                    return float(item["pchs_avg_pric"]) # 매입평균가격 반환
+    except Exception as e:
+        logging.error(f"잔고 조회 에러: {e}")
+    return None
 
 def get_detailed_price(stock_code):
     token = get_token()
@@ -509,21 +528,34 @@ def scanner_loop():
                 qty = BUY_AMOUNT // current_price
                 if qty <= 0: continue
 
-                # 매수 실행
+                # 💡 매수 실행
                 if buy_market(code, name, qty):
-                    ts = TrailingStop(entry_price=current_price)
+                    # 주문이 체결될 시간을 2초 정도 넉넉히 줌
+                    time.sleep(2) 
+                    
+                    # 💡 [핵심] 실제 잔고에서 찐 평단가를 가져옴!
+                    real_entry_price = get_real_buy_price(code)
+                    
+                    # 만약 API 에러로 못 가져왔다면 아쉬운 대로 아까 본 가격 사용
+                    if real_entry_price is None or real_entry_price == 0:
+                        real_entry_price = current_price
+                        logging.warning(f"⚠️ {name} 실제 평단가 조회 실패 -> 예상가 {current_price}원 사용")
+
+                    # 진짜 평단가로 트레일링 스탑 기준을 잡음!
+                    ts = TrailingStop(entry_price=real_entry_price)
                     with positions_lock:
-                        positions[code] = {"name": name, "qty": qty, "entry_price": current_price, "ts": ts}
+                        positions[code] = {"name": name, "qty": qty, "entry_price": real_entry_price, "ts": ts}
                     
                     save_positions()
                     
-                    msg = f"🟢 신규 진입\n종목: {name}\n진입가: {current_price:,}원\n수량: {qty}주\n현재 보유: {len(positions)}개"
+                    # 알림에도 진짜 평단가를 쏴줌
+                    msg = f"🟢 신규 진입\n종목: {name}\n진입가(실제): {real_entry_price:,.0f}원\n수량: {qty}주\n현재 보유: {len(positions)}개"
                     send_discord(msg)
-                    logging.info(f"Position opened: {name} @ {current_price} (시가대비 +{real_change_rate:.2f}%)")
+                    logging.info(f"Position opened: {name} @ {real_entry_price} (예상가 {current_price}에서 보정됨)")
                     
                     available_cash -= (current_price * qty)
                     if available_cash < BUY_AMOUNT:
-                        break 
+                        break
 
                 time.sleep(0.5)
 
