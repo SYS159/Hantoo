@@ -10,13 +10,13 @@ cd Hantoo
 ```bash
 ps -ef | grep python
 nohup python3 -u HM_v1_5.py > /dev/null 2>&1 &
-nohup python3 -u HTD_v2_2.py > /dev/null 2>&1 &
+nohup python3 -u HTD_v2_4.py > /dev/null 2>&1 &
 ```
 
 ## 정지
 ```bash
 pkill -f HM_v1_5.py
-pkill -f HTD_v2_2.py
+pkill -f HTD_v2_4.py
 ```
 
 
@@ -99,5 +99,11 @@ pkill -f HTD_v2_2.py
 
 **HTD_v2_2**
 - 매도 안되는 문제 해결
+
+**HTD_v2_3**
+- 순수 거래량으로만 거래
+
+**HTD_v2_4**
+- 매수/매도 가격 정확히
 
 ---

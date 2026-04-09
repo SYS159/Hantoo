@@ -22,13 +22,13 @@ BASE_URL = "https://openapi.koreainvestment.com:9443"
 
 TOKEN_FILE  = "token.json"
 TRADES_FILE = "trades.csv"
-LOG_NAME    = "HTD_v2_2.log"
+LOG_NAME    = "HTD_v2_3.log"
 ASSET_FILE  = "weekly_asset.json"
 POSITIONS_FILE = "positions.json"
 SOLD_FILE = "sold_today.json"
 
 # =========================
-# 전략 파라미터 (V2.2: 아침 20분 단기 결전 모드)
+# 전략 파라미터 (V2.4: 순수 거래량 모멘텀)
 # =========================
 BUY_AMOUNT = 450_000        
 MIN_PRICE = 1000            
@@ -36,23 +36,21 @@ MIN_PRICE = 1000
 SCAN_INTERVAL = 10          
 TRAILING_INTERVAL = 3       
 
+# 1. 깡패 지표 1: 전일 대비 4% 이상 15% 이하의 찐 상승만 노림
 MIN_CHANGE_RATE = 4.0       
 MAX_CHANGE_RATE = 15.0      
-MIN_REAL_CHANGE_RATE = 2.0  
-
-# 💡 [신규 방어막] 최고가 대비 하락률 허들
-MAX_DROP_FROM_HIGH = 1  # 오늘 고점에서 2.5% 이상 흘러내린 종목은 거래량이 터져도 절대 안 삼! 
 
 EXCLUDE_KEYWORDS = ["인버스", "스팩", "ETN", "ETF", "타이거", "코덱스", "KODEX", "TIGER"]
 
-VOLUME_RATIO = 0.005   
+# 2. 깡패 지표 2: 거래량 (방어막을 다 치웠으니 최소 3%는 터져야 진짜 수급으로 인정!)
+VOLUME_RATIO = 0.03
 
 STOP_LOSS_RATE = -2.0       
 TRAILING_TRIGGER = 2.0      
 TRAILING_DROP = 1.5         
 
 SCAN_START  = (9,  2)       
-SCAN_END    = (9, 15)       
+SCAN_END    = (9, 15)       # 넉넉하게 30분까지 열어둠
 TRAILING_END = (15, 20)   
 
 # =========================
@@ -106,7 +104,7 @@ def load_positions():
                     "qty": info["qty"],
                     "entry_price": info["entry_price"],
                     "ts": ts,
-                    "selling": False # 재시작 시 매도 상태 초기화 (락 해제)
+                    "selling": False 
                 }
         if positions:
             logging.info(f"💾 이전 보유 장부 복구 완료: {len(positions)}개 감시 재개")
@@ -143,21 +141,16 @@ def load_sold_today():
 # =========================
 def check_weekly_reset():
     now = datetime.now()
-    # 월요일(0) 아침 9시 0분 ~ 4분 사이일 때 작동
     if now.weekday() == 0 and now.hour == 9 and 0 <= now.minute < 5:
-        
-        # 💡 [버그 픽스] 오늘 이미 자산을 기록했는지 먼저 확인!
         if os.path.exists(ASSET_FILE):
             try:
                 with open(ASSET_FILE, "r") as f:
                     data = json.load(f)
-                    # 파일에 적힌 날짜가 '오늘'이면 이미 한 거니까 알림 없이 쿨하게 패스!
                     if data.get("date") == str(now.date()):
                         return 
             except Exception:
-                pass # 파일이 없거나 깨졌으면 아래 로직으로 넘어가서 새로 씀
+                pass 
 
-        # 오늘 처음 조건에 걸렸을 때만 잔고 조회하고 파일 덮어쓰기 & 알림 1번 발송
         current_cash = get_available_cash() 
         with open(ASSET_FILE, "w") as f:
             json.dump({"base_asset": current_cash, "date": str(now.date())}, f)
@@ -218,7 +211,6 @@ def get_top_stocks():
     except:
         return []
 
-# 💡 누락되었던 현재가 조회 함수 복구 완료!
 def get_current_price(stock_code):
     token = get_token()
     if not token: return None
@@ -233,7 +225,6 @@ def get_current_price(stock_code):
         return None
 
 def get_real_position_info(stock_code):
-    """💡 찐 평단가와 수량을 가져오고, 수동 매도(잔고 0주)까지 감지하는 완벽한 함수"""
     token = get_token()
     if not token: return None, None
     url = f"{BASE_URL}/uapi/domestic-stock/v1/trading/inquire-balance"
@@ -250,7 +241,6 @@ def get_real_position_info(stock_code):
             for item in data.get("output1", []):
                 if stock_code in item["pdno"]: 
                     return float(item["pchs_avg_pric"]), int(item["hldg_qty"])
-            # 💡 통신은 성공했는데 리스트에 내 주식이 없다면? = 이미 다 팔려서 0주가 된 상태!
             return 0.0, 0
     except Exception as e:
         logging.error(f"잔고 조회 에러: {e}")
@@ -268,7 +258,7 @@ def get_detailed_price(stock_code):
         if data.get("rt_cd") == "0":
             current = int(data["output"]["stck_prpr"])
             open_p = int(data["output"]["stck_oprc"])
-            high_p = int(data["output"]["stck_hgpr"]) # 💡 오늘 최고가 데이터 추가 추출!
+            high_p = int(data["output"]["stck_hgpr"])
             return current, open_p, high_p
         return None, None, None
     except:
@@ -422,11 +412,9 @@ def execute_async_sell(code, name, qty, entry_price, trigger_price, signal):
             send_discord(msg)
             logging.info(f"Position closed ({label}): {name} {rate:.2f}%")
         else:
-            # 💡 [수동 매도 감지 기능] 증권사가 거절하면 실제 잔고가 남아있는지 팩트 체크!
             _, real_qty = get_real_position_info(code)
             
             if real_qty == 0:
-                # 네가 직접 팔아서 잔고가 없는 거라면 조용히 장부에서 지워줌
                 with positions_lock:
                     if code in positions: del positions[code]
                 save_positions()
@@ -436,7 +424,6 @@ def execute_async_sell(code, name, qty, entry_price, trigger_price, signal):
                 send_discord(f"👻 [{name}] 수동 매도 감지! 잔고가 없어 봇의 장부에서 안전하게 삭제했습니다.")
                 logging.warning(f"{name} 잔고 0주 확인 -> 장부 삭제 완료")
             else:
-                # 잔고가 남았는데 거절당한 거라면 다음 루프에 다시 시도하도록 락만 풀어줌
                 with positions_lock:
                     if code in positions: positions[code]["selling"] = False
                 
@@ -483,7 +470,7 @@ class TrailingStop:
 # 스캐너 루프
 # =========================
 def scanner_loop():
-    logging.info("Scanner loop started")
+    logging.info("Scanner loop started (V2.3: 순수 거래량 모멘텀)")
     
     current_date = datetime.now().date() 
     
@@ -542,20 +529,12 @@ def scanner_loop():
                 if volume_ratio < required_volume_ratio:
                     continue
 
-                # 💡 [변경] 함수가 3개의 값을 리턴하도록 수정됨
-                current_price, open_price, high_price = get_detailed_price(code)
-                if not current_price or current_price < MIN_PRICE or not open_price or open_price <= 0: 
+                # 💡 [변경] 시작가, 최고가 조건 싹 날리고 현재가만 깔끔하게 가져옴
+                current_price, _, _ = get_detailed_price(code)
+                if not current_price or current_price < MIN_PRICE: 
                     continue
 
-                real_change_rate = ((current_price - open_price) / open_price) * 100
-                if real_change_rate < MIN_REAL_CHANGE_RATE:
-                    continue
-
-                # 💡 [핵심 방어막] 폭포수 떨어지는 칼날 회피 로직!
-                drop_from_high = ((high_price - current_price) / high_price) * 100
-                if drop_from_high > MAX_DROP_FROM_HIGH:
-                    # 거래량이 아무리 터져도 고점에서 2.5% 이상 박살 나고 있다면 세력의 '설거지'로 간주!
-                    continue
+                # (이전에 있던 real_change_rate와 drop_from_high 로직 완전히 삭제됨!)
 
                 qty = BUY_AMOUNT // current_price
                 if qty <= 0: continue
@@ -565,7 +544,6 @@ def scanner_loop():
                     
                     real_entry_price = None
                     real_qty = qty
-                    # 💡 잔고에 완벽히 들어올 때까지 최대 10초간 5번 끈질기게 물어봄!
                     for _ in range(5):
                         time.sleep(2) 
                         real_entry_price, real_qty_api = get_real_position_info(code)
@@ -584,14 +562,14 @@ def scanner_loop():
                             "qty": real_qty, 
                             "entry_price": real_entry_price, 
                             "ts": ts,
-                            "selling": False # 락 해제 상태로 감시 시작
+                            "selling": False
                         }
                     
                     save_positions()
                     
                     msg = f"🟢 신규 진입\n종목: {name}\n진입가(실제): {real_entry_price:,.0f}원\n수량: {real_qty}주\n현재 보유: {len(positions)}개"
                     send_discord(msg)
-                    logging.info(f"Position opened: {name} @ {real_entry_price} (예상가 {current_price}에서 보정됨)")
+                    logging.info(f"Position opened: {name} @ {real_entry_price} (순수 거래량 모멘텀 진입)")
                     
                     available_cash -= (current_price * qty)
                     if available_cash < BUY_AMOUNT:
@@ -644,7 +622,6 @@ def trailing_loop():
                     if code not in positions: continue
                     pos = positions[code]
                     
-                    # 💡 봇이 이미 매도 주문을 넣은 상태라면 중복 주문 방지!
                     if pos.get("selling", False): 
                         continue
 
@@ -658,7 +635,6 @@ def trailing_loop():
 
                 if signal == "HOLD": continue
 
-                # 💡 익절/손절 신호가 오면, "나 지금 파는 중이야!" 하고 자물쇠(Lock)를 채움
                 with positions_lock:
                     if code in positions:
                         positions[code]["selling"] = True
@@ -684,7 +660,7 @@ if __name__ == "__main__":
     load_positions()
     load_sold_today()
     
-    msg = f"🚀 HTD 자동매매 봇 시작 (V2.2 - 현재가 복구 및 수동 매도 감지 패치)\n현재 감시: {len(positions)}개 / 오늘 제외: {len(sold_today)}개"
+    msg = f"🚀 HTD 자동매매 봇 시작 (V2.3 - 순수 거래량 돌파 야수 모드)\n현재 감시: {len(positions)}개 / 오늘 제외: {len(sold_today)}개"
     send_discord(msg)
 
     t1 = threading.Thread(target=scanner_loop, daemon=True)
