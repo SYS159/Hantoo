@@ -41,14 +41,14 @@ MAX_CHANGE_RATE = 15.0
 
 EXCLUDE_KEYWORDS = ["인버스", "스팩", "ETN", "ETF", "타이거", "코덱스", "KODEX", "TIGER"]
 
-VOLUME_RATIO = 0.03
+VOLUME_RATIO = 0.01
 
 STOP_LOSS_RATE = -2.0       
 TRAILING_TRIGGER = 2.0      
 TRAILING_DROP = 1.5         
 
 SCAN_START  = (9,  2)       
-SCAN_END    = (9, 20)       
+SCAN_END    = (9, 15)       
 TRAILING_END = (15, 20)   
 
 # =========================
@@ -150,10 +150,11 @@ def check_weekly_reset():
                 pass 
 
         current_cash = get_available_cash() 
-        with open(ASSET_FILE, "w") as f:
-            json.dump({"base_asset": current_cash, "date": str(now.date())}, f)
-        send_discord(f"📅 주간 수익률 초기화 완료\n기준 자산: {current_cash:,}원")
-        logging.info(f"Weekly reset: {current_cash}원")
+        if current_cash >= 0:
+            with open(ASSET_FILE, "w") as f:
+                json.dump({"base_asset": current_cash, "date": str(now.date())}, f)
+            send_discord(f"📅 주간 수익률 초기화 완료\n기준 자산: {current_cash:,}원")
+            logging.info(f"Weekly reset: {current_cash}원")
 
 def send_discord(msg):
     try:
@@ -169,16 +170,17 @@ def get_token():
 
 def get_available_cash():
     token = get_token()
-    if not token: return 0
+    if not token: return -1
     url = f"{BASE_URL}/uapi/domestic-stock/v1/trading/inquire-psbl-order"
     headers = {"authorization": f"Bearer {token}", "appKey": APP_KEY, "appSecret": APP_SECRET, "tr_id": "TTTC8908R"}
     params = {"CANO": ACCOUNT[:8], "ACNT_PRDT_CD": ACCOUNT[8:], "PDNO": "005930", "ORD_UNPR": "0", "ORD_DVSN": "01", "CMA_EVLU_AMT_ICLD_YN": "N", "OVRS_ICLD_YN": "N"}
     try:
         res = requests.get(url, headers=headers, params=params, timeout=10)
         data = res.json()
-        return int(data["output"]["ord_psbl_cash"]) if data.get("rt_cd") == "0" else 0
+        # 💡 [버그 픽스] API 에러면 -1을 리턴해서 스캐너가 조용히 패스하게 만듦
+        return int(data["output"]["ord_psbl_cash"]) if data.get("rt_cd") == "0" else -1
     except:
-        return 0
+        return -1
 
 def save_trade(name, code, entry_price, exit_price, qty, reason):
     profit_amt  = (exit_price - entry_price) * qty
@@ -241,7 +243,7 @@ def get_real_position_info(stock_code):
                     return float(item["pchs_avg_pric"]), int(item["hldg_qty"])
             return 0.0, 0
     except Exception as e:
-        logging.error(f"잔고 조회 에러: {e}")
+        pass
     return None, None
 
 def get_detailed_price(stock_code):
@@ -295,11 +297,9 @@ def buy_market(stock_code, stock_name, qty):
     except:
         return False
 
-# 💡 [버그 픽스] 시장가 매도 성공 시, 추정된 체결 단가(est_price)를 함께 리턴함
 def sell_market(stock_code, stock_name, qty):
     token = get_token()
     if not token: return False, 0
-    est_price = get_current_price(stock_code) # 주문 던지기 직전의 찐 현재가 기록
     url = f"{BASE_URL}/uapi/domestic-stock/v1/trading/order-cash"
     headers = {"authorization": f"Bearer {token}", "appKey": APP_KEY, "appSecret": APP_SECRET, "tr_id": "TTTC0801U"}
     data = {"CANO": ACCOUNT[:8], "ACNT_PRDT_CD": ACCOUNT[8:], "PDNO": stock_code, "ORD_DVSN": "01", "ORD_QTY": str(qty), "ORD_UNPR": "0"}
@@ -307,7 +307,10 @@ def sell_market(stock_code, stock_name, qty):
         res = requests.post(url, headers=headers, json=data, timeout=10)
         data = res.json()
         if data.get("rt_cd") == "0":
-            return True, est_price
+            # 💡 [버그 픽스] 시장가 주문 던진 후 1초 대기했다가 가격을 조회해서 슬리피지 근사치를 잡아냄
+            time.sleep(1)
+            final_est = get_current_price(stock_code)
+            return True, final_est
         else:
             logging.error(f"🔴 시장가 매도 거절 [{stock_name}]: {data.get('msg1')}")
             return False, 0
@@ -346,10 +349,8 @@ def is_executed(order_no):
                 return int(item.get("ncnl_qty", 1)) == 0
         return True 
     except Exception as e:
-        logging.error(f"체결 확인 에러: {e}")
         return False
 
-# 💡 [버그 픽스] 지정가 매도 성공 시, 증권사에 요청했던 그 찐 단가(current_price)를 함께 리턴함
 def sell_smart(stock_code, stock_name, qty):
     retry_count = 0
     while retry_count < 6:
@@ -378,7 +379,6 @@ def sell_smart(stock_code, stock_name, qty):
                     executed = True
                     break
             
-            # 여기서 체결되었다면, 내가 던졌던 지정가 가격이 곧 100% 체결 단가임!
             if executed: return True, current_price 
             
             cancel_order(order_no)
@@ -392,7 +392,6 @@ def sell_smart(stock_code, stock_name, qty):
 
 def execute_async_sell(code, name, qty, entry_price, trigger_price, signal):
     try:
-        # 💡 [버그 픽스] 매도 함수들이 리턴한 '찐 체결 단가(final_price)'를 받아옴!
         if signal == "STOP_LOSS":
             success, final_price = sell_market(code, name, qty)
             label, emoji = "손절", "🔴"
@@ -401,9 +400,8 @@ def execute_async_sell(code, name, qty, entry_price, trigger_price, signal):
             label, emoji = "익절 (트레일링)", "🟡"
 
         if success:
-            # 방어 코드: 혹시나 단가를 못 가져왔을 때만 현재가를 조회함
             if not final_price or final_price == 0:
-                final_price = get_current_price(code) or trigger_price
+                final_price = trigger_price
                 
             rate = (final_price - entry_price) / entry_price * 100
             
@@ -415,7 +413,7 @@ def execute_async_sell(code, name, qty, entry_price, trigger_price, signal):
                 if code in positions: del positions[code]
             save_positions()
             
-            msg = f"{emoji} {label} 완료\n종목: {name} ({code})\n진입가: {entry_price:,.0f}원\n청산가: {final_price:,.0f}원\n수익률: {rate:.2f}%"
+            msg = f"{emoji} {label} 완료\n종목: {name} ({code})\n진입가: {entry_price:,.0f}원\n청산가(추정): {final_price:,.0f}원\n수익률: {rate:.2f}%"
             send_discord(msg)
             logging.info(f"Position closed ({label}): {name} {rate:.2f}%")
         else:
@@ -502,8 +500,8 @@ def scanner_loop():
                 continue
 
             available_cash = get_available_cash()
-            if available_cash == 0:
-                logging.warning("⚠️ 예수금 조회 실패 또는 잔고 0원! API 세팅(.env)을 확인하세요.")
+            # 💡 [버그 픽스] API 에러(-1)면 경고 없이 그냥 다음 루프로 넘어감 (알림 폭탄 제거)
+            if available_cash == -1:
                 time.sleep(SCAN_INTERVAL)
                 continue
             elif available_cash < BUY_AMOUNT:
@@ -545,10 +543,12 @@ def scanner_loop():
 
                 # 매수 실행
                 if buy_market(code, name, qty):
+                    
                     real_entry_price = None
                     real_qty = qty
-                    for _ in range(5):
-                        time.sleep(2) 
+                    # 💡 [핵심 버그 픽스] 서버 지연에 굴복하지 않음! 최대 30초(10번) 동안 끈질기게 매달림
+                    for _ in range(10):
+                        time.sleep(3) 
                         real_entry_price, real_qty_api = get_real_position_info(code)
                         if real_entry_price and real_entry_price > 0 and real_qty_api and real_qty_api > 0:
                             real_qty = real_qty_api
@@ -556,7 +556,7 @@ def scanner_loop():
                     
                     if not real_entry_price or real_entry_price == 0:
                         real_entry_price = float(current_price)
-                        logging.warning(f"⚠️ {name} 잔고 조회 계속 실패 -> 예상가 {current_price}원 사용")
+                        logging.warning(f"⚠️ {name} 30초 대기 후에도 잔고 조회 실패 -> 예상가 {current_price}원 사용 (서버 지연 극심)")
 
                     ts = TrailingStop(entry_price=real_entry_price)
                     with positions_lock:
@@ -665,7 +665,7 @@ if __name__ == "__main__":
     load_positions()
     load_sold_today()
     
-    msg = f"🚀 HTD 자동매매 봇 시작 (V2.4_Fix - 매도 단가 완벽 보정 및 유령 클론 방지)\n현재 감시: {len(positions)}개 / 오늘 제외: {len(sold_today)}개"
+    msg = f"🚀 HTD 자동매매 봇 시작 (V2.4_Fix2 - 30초 끈질긴 조회 및 슬리피지 보정)\n현재 감시: {len(positions)}개 / 오늘 제외: {len(sold_today)}개"
     send_discord(msg)
 
     t1 = threading.Thread(target=scanner_loop, daemon=True)
